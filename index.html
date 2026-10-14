@@ -490,7 +490,19 @@ button:disabled {
     INTERFREIGHT GROUP · Incident Report Management
 </footer>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
+// 1) Replace the placeholder below with your Supabase anon/publishable key.
+const SUPABASE_URL = "https://tuihpvykuqbqnfyfepql.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR1aWhwdnlrdXFicW5meWZlcHFsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE3Mjg4OTcsImV4cCI6MjA5NzMwNDg5N30.HZKS8CgFLjkZ-Bx2AIjFjurH3IsKjvf37Ft852CzJsQ";
+const ATTACHMENT_BUCKET = "incident-attachments";
+
+const supabaseReady = Boolean(window.supabase && SUPABASE_ANON_KEY &&
+    SUPABASE_ANON_KEY !== "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR1aWhwdnlrdXFicW5meWZlcHFsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE3Mjg4OTcsImV4cCI6MjA5NzMwNDg5N30.HZKS8CgFLjkZ-Bx2AIjFjurH3IsKjvf37Ft852CzJsQ");
+const supabaseClient = supabaseReady
+    ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+    : null;
+
 const form = document.getElementById("incidentForm");
 const reportDate = document.getElementById("reportDate");
 const incidentDate = document.getElementById("incidentDate");
@@ -567,10 +579,14 @@ document.getElementById("printButton").addEventListener("click", () => {
     window.print();
 });
 
-form.addEventListener("submit", (event) => {
+form.addEventListener("submit", async (event) => {
     event.preventDefault();
-
     if (!form.reportValidity()) return;
+
+    if (!supabaseClient) {
+        showMessage("Supabase is not configured yet. Add your Supabase anon/publishable key to SUPABASE_ANON_KEY in this file, then try again.", "error");
+        return;
+    }
 
     if (incidentDate.value > localDateString()) {
         showMessage("The incident date cannot be in the future.", "error");
@@ -578,17 +594,64 @@ form.addEventListener("submit", (event) => {
     }
 
     const file = attachment.files[0];
-
     if (file && file.size > 5 * 1024 * 1024) {
         showMessage("The attachment must not exceed 5 MB.", "error");
         return;
     }
 
-    showMessage(
-        "The form is valid, but it has NOT been submitted or saved. " +
-        "The next step is to connect this page to Supabase.",
-        "success"
-    );
+    const submitButton = form.querySelector('button[type="submit"]');
+    const originalButtonText = submitButton.textContent;
+    submitButton.disabled = true;
+    submitButton.textContent = "Submitting...";
+    showMessage("Submitting your incident report. Please wait...", "success");
+
+    let uploadedPath = null;
+    try {
+        // Upload optional attachment first; only the storage path is saved in the table.
+        if (file) {
+            const extensionMatch = file.name.match(/\.([a-z0-9]+)$/i);
+            const extension = extensionMatch ? extensionMatch[1].toLowerCase() : "file";
+            uploadedPath = "submissions/" + crypto.randomUUID() + "." + extension;
+            const { error: uploadError } = await supabaseClient.storage
+                .from(ATTACHMENT_BUCKET)
+                .upload(uploadedPath, file, {
+                    upsert: false,
+                    contentType: file.type || "application/octet-stream"
+                });
+            if (uploadError) throw new Error("Attachment upload failed: " + uploadError.message);
+        }
+
+        const report = {
+            report_date: reportDate.value || localDateString(),
+            incident_date: incidentDate.value,
+            incident_location: document.getElementById("incidentLocation").value.trim(),
+            description: document.getElementById("description").value.trim(),
+            individuals_involved: document.getElementById("individuals").value.trim(),
+            employee_id: document.getElementById("employeeId").value.trim(),
+            employee_name: document.getElementById("employeeName").value.trim(),
+            department: document.getElementById("department").value,
+            attachment_path: uploadedPath,
+            manager_status: "Pending",
+            hr_status: "Waiting"
+        };
+
+        const { error: insertError } = await supabaseClient
+            .from("incident_reports")
+            .insert([report]);
+
+        if (insertError) throw new Error("Database save failed: " + insertError.message);
+
+        showMessage("Incident report submitted successfully. Your department manager must review it first.", "success");
+        form.reset();
+        reportDate.value = localDateString();
+        fileName.textContent = "No file selected.";
+    } catch (error) {
+        console.error("Incident report submission error:", error);
+        showMessage("Unable to submit the incident report. " + (error.message || "Please try again or contact IT."), "error");
+    } finally {
+        submitButton.disabled = false;
+        submitButton.textContent = originalButtonText;
+    }
 });
 </script>
 
