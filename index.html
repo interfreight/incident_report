@@ -484,6 +484,57 @@ button:disabled {
             </div>
         </form>
     </section>
+    
+<section class="card" id="incidentHistory">
+    <h2 class="card-title">My Incident Report History</h2>
+    <p class="subtitle">
+        Enter your Employee ID to view the review status of your submitted reports.
+    </p>
+
+    <div class="field">
+        <label for="historyEmployeeId">Employee ID</label>
+        <input
+            type="text"
+            id="historyEmployeeId"
+            maxlength="50"
+            placeholder="Enter your Employee ID"
+        >
+    </div>
+
+    <div class="actions">
+        <button
+            type="button"
+            class="btn-primary"
+            id="loadHistoryButton"
+        >
+            View My Reports
+        </button>
+    </div>
+
+    <div id="historyMessage" class="message" role="status"></div>
+
+    <div style="overflow-x:auto; margin-top:20px;">
+        <table style="width:100%; border-collapse:collapse; font-size:13px;">
+            <thead>
+                <tr style="background:#eef3f9; text-align:left;">
+                    <th style="padding:12px;">Report Date</th>
+                    <th style="padding:12px;">Incident Date</th>
+                    <th style="padding:12px;">Location</th>
+                    <th style="padding:12px;">Manager Status</th>
+                    <th style="padding:12px;">HR Status</th>
+                </tr>
+            </thead>
+            <tbody id="historyTableBody">
+                <tr>
+                    <td colspan="5" style="padding:15px; text-align:center;">
+                        Enter your Employee ID to view your reports.
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+
 </main>
 
 <footer class="footer">
@@ -658,6 +709,127 @@ form.addEventListener("submit", async (event) => {
         submitButton.textContent = originalButtonText;
     }
 });
+    
+const historyEmployeeId = document.getElementById("historyEmployeeId");
+const loadHistoryButton = document.getElementById("loadHistoryButton");
+const historyTableBody = document.getElementById("historyTableBody");
+const historyMessage = document.getElementById("historyMessage");
+
+function getStatusLabel(status) {
+    const value = String(status || "").trim();
+
+    if (value.toLowerCase() === "approved") {
+        return "Approved";
+    }
+
+    if (value.toLowerCase() === "rejected") {
+        return "Rejected";
+    }
+
+    if (value.toLowerCase() === "pending") {
+        return "Pending";
+    }
+
+    if (value.toLowerCase() === "waiting") {
+        return "Waiting";
+    }
+
+    return value || "Not yet reviewed";
+}
+
+function makeCell(text) {
+    const cell = document.createElement("td");
+
+    cell.style.padding = "12px";
+    cell.style.borderBottom = "1px solid #dce3ec";
+    cell.style.verticalAlign = "top";
+    cell.textContent = text || "—";
+
+    return cell;
+}
+
+loadHistoryButton.addEventListener("click", async () => {
+    const employeeId = historyEmployeeId.value.trim();
+
+    historyMessage.className = "message";
+    historyMessage.textContent = "";
+    historyTableBody.replaceChildren();
+
+    if (!employeeId) {
+        showHistoryMessage("Please enter your Employee ID.", "error");
+        return;
+    }
+
+    if (!supabaseClient) {
+        showHistoryMessage("Supabase is not configured.", "error");
+        return;
+    }
+
+    loadHistoryButton.disabled = true;
+    loadHistoryButton.textContent = "Loading...";
+
+    try {
+        const { data, error } = await supabaseClient
+            .from("incident_reports")
+            .select(`
+                report_date,
+                incident_date,
+                incident_location,
+                manager_status,
+                hr_status
+            `)
+            .eq("employee_id", employeeId)
+            .order("created_at", { ascending: false });
+
+        if (error) {
+            throw error;
+        }
+
+        if (!data || data.length === 0) {
+            const row = document.createElement("tr");
+            const cell = makeCell("No incident reports found for this Employee ID.");
+            cell.colSpan = 5;
+            cell.style.textAlign = "center";
+            row.appendChild(cell);
+            historyTableBody.appendChild(row);
+            return;
+        }
+
+        data.forEach((report) => {
+            const row = document.createElement("tr");
+
+            row.appendChild(makeCell(report.report_date || "—"));
+            row.appendChild(makeCell(report.incident_date || "—"));
+            row.appendChild(makeCell(report.incident_location || "—"));
+            row.appendChild(makeCell(getStatusLabel(report.manager_status)));
+            row.appendChild(makeCell(getStatusLabel(report.hr_status)));
+
+            historyTableBody.appendChild(row);
+        });
+
+        showHistoryMessage(
+            "Found " + data.length + " incident report(s).",
+            "success"
+        );
+    } catch (error) {
+        console.error("Incident history error:", error);
+
+        showHistoryMessage(
+            "Unable to load report history. " +
+            (error.message || "Please try again."),
+            "error"
+        );
+    } finally {
+        loadHistoryButton.disabled = false;
+        loadHistoryButton.textContent = "View My Reports";
+    }
+});
+
+function showHistoryMessage(text, type) {
+    historyMessage.textContent = text;
+    historyMessage.className = "message " + type;
+}
+
 </script>
 
 </body>
