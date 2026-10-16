@@ -558,10 +558,20 @@ const supabaseReady = Boolean(
 const supabaseClient = supabaseReady
     ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
     : null;
-// Get the currently logged-in employee
-const currentUser = JSON.parse(
-    localStorage.getItem("currentUser") || "null"
-);
+function getCurrentUser() {
+    try {
+        return JSON.parse(
+            localStorage.getItem("currentUser") || "null"
+        );
+    } catch (error) {
+        console.error("Unable to read currentUser:", error);
+        return null;
+    }
+}
+
+let currentUser = getCurrentUser();
+    console.log("Current employee session:", currentUser);
+console.log("Current employee ID:", currentUser?.id);
 const form = document.getElementById("incidentForm");
 const reportDate = document.getElementById("reportDate");
 const incidentDate = document.getElementById("incidentDate");
