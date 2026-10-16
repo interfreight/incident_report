@@ -558,7 +558,10 @@ const supabaseReady = Boolean(
 const supabaseClient = supabaseReady
     ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
     : null;
-
+// Get the currently logged-in employee
+const currentUser = JSON.parse(
+    localStorage.getItem("currentUser") || "null"
+);
 const form = document.getElementById("incidentForm");
 const reportDate = document.getElementById("reportDate");
 const incidentDate = document.getElementById("incidentDate");
@@ -677,30 +680,41 @@ form.addEventListener("submit", async (event) => {
             if (uploadError) throw new Error("Attachment upload failed: " + uploadError.message);
         }
 
-        const report = {
-            report_date: reportDate.value || localDateString(),
-            incident_date: incidentDate.value,
-            incident_location: document.getElementById("incidentLocation").value.trim(),
-            description: document.getElementById("description").value.trim(),
-            individuals_involved: document.getElementById("individuals").value.trim(),
-            employee_id: document.getElementById("employeeId").value.trim(),
-            employee_name: document.getElementById("employeeName").value.trim(),
-            department: document.getElementById("department").value,
-            attachment_path: uploadedPath,
-            manager_status: "Pending",
-            hr_status: "Waiting"
-        };
+      if (!currentUser || currentUser.id == null) {
+    throw new Error(
+        "Unable to identify your logged-in account. Please log in again."
+    );
+}
 
+const report = {
+    user_id: currentUser.id,
+    report_date: reportDate.value || localDateString(),
+    incident_date: incidentDate.value,
+    incident_location: document.getElementById("incidentLocation").value.trim(),
+    description: document.getElementById("description").value.trim(),
+    individuals_involved: document.getElementById("individuals").value.trim(),
+    employee_id: document.getElementById("employeeId").value.trim(),
+    employee_name: document.getElementById("employeeName").value.trim(),
+    department: document.getElementById("department").value,
+    attachment_path: uploadedPath,
+    manager_status: "Pending",
+    hr_status: "Waiting"
+};
         const { error: insertError } = await supabaseClient
             .from("incident_reports")
             .insert([report]);
 
         if (insertError) throw new Error("Database save failed: " + insertError.message);
+showMessage(
+    "Incident report submitted successfully. Your department manager must review it first.",
+    "success"
+);
 
-        showMessage("Incident report submitted successfully. Your department manager must review it first.", "success");
-        form.reset();
-        reportDate.value = localDateString();
-        fileName.textContent = "No file selected.";
+form.reset();
+reportDate.value = localDateString();
+fileName.textContent = "No file selected.";
+
+await loadIncidentHistory();
     } catch (error) {
         console.error("Incident report submission error:", error);
         showMessage("Unable to submit the incident report. " + (error.message || "Please try again or contact IT."), "error");
@@ -709,64 +723,90 @@ form.addEventListener("submit", async (event) => {
         submitButton.textContent = originalButtonText;
     }
 });
-    
-const historyEmployeeId = document.getElementById("historyEmployeeId");
-const loadHistoryButton = document.getElementById("loadHistoryButton");
+
 const historyTableBody = document.getElementById("historyTableBody");
 const historyMessage = document.getElementById("historyMessage");
 
-function getStatusLabel(status) {
-    const value = String(status || "").trim();
+// Hide the manual Employee ID search because the account identifies the user.
+const historySection = document.getElementById("incidentHistory");
+const historySearchField = document.getElementById("historyEmployeeId");
 
-    if (value.toLowerCase() === "approved") {
-        return "Approved";
-    }
+if (historySearchField) {
+    historySearchField.closest(".field")?.remove();
+}
 
-    if (value.toLowerCase() === "rejected") {
-        return "Rejected";
-    }
+const historySubtitle = historySection?.querySelector(".subtitle");
+if (historySubtitle) {
+    historySubtitle.textContent =
+        "Your submitted incident reports and their review statuses.";
+}
 
-    if (value.toLowerCase() === "pending") {
-        return "Pending";
-    }
+const historyActions = document.querySelector(
+    "#incidentHistory .actions"
+);
+if (historyActions) {
+    historyActions.remove();
+}
 
-    if (value.toLowerCase() === "waiting") {
-        return "Waiting";
-    }
-
-    return value || "Not yet reviewed";
+function showHistoryMessage(text, type) {
+    historyMessage.textContent = text;
+    historyMessage.className = "message " + type;
 }
 
 function makeCell(text) {
     const cell = document.createElement("td");
-
     cell.style.padding = "12px";
     cell.style.borderBottom = "1px solid #dce3ec";
     cell.style.verticalAlign = "top";
     cell.textContent = text || "—";
-
     return cell;
 }
 
-loadHistoryButton.addEventListener("click", async () => {
-    const employeeId = historyEmployeeId.value.trim();
+function getStatusLabel(status) {
+    const value = String(status || "").trim();
+    const normalized = value.toLowerCase();
 
-    historyMessage.className = "message";
-    historyMessage.textContent = "";
+    if (normalized === "approved") return "Approved";
+    if (normalized === "rejected") return "Rejected";
+    if (normalized === "pending") return "Pending";
+    if (normalized === "waiting") return "Waiting";
+
+    return value || "Not yet reviewed";
+}
+
+function addHistoryMessageRow(text) {
     historyTableBody.replaceChildren();
 
-    if (!employeeId) {
-        showHistoryMessage("Please enter your Employee ID.", "error");
+    const row = document.createElement("tr");
+    const cell = makeCell(text);
+
+    cell.colSpan = 5;
+    cell.style.textAlign = "center";
+
+    row.appendChild(cell);
+    historyTableBody.appendChild(row);
+}
+
+async function loadIncidentHistory() {
+    historyTableBody.replaceChildren();
+    showHistoryMessage("", "");
+
+    if (!currentUser || currentUser.id == null) {
+        addHistoryMessageRow("Please log in to view your incident reports.");
+        showHistoryMessage(
+            "Your login session was not found. Please log in again.",
+            "error"
+        );
         return;
     }
 
     if (!supabaseClient) {
+        addHistoryMessageRow("Supabase is not configured.");
         showHistoryMessage("Supabase is not configured.", "error");
         return;
     }
 
-    loadHistoryButton.disabled = true;
-    loadHistoryButton.textContent = "Loading...";
+    addHistoryMessageRow("Loading your incident reports...");
 
     try {
         const { data, error } = await supabaseClient
@@ -776,31 +816,27 @@ loadHistoryButton.addEventListener("click", async () => {
                 incident_date,
                 incident_location,
                 manager_status,
-                hr_status
+                hr_status,
+                created_at
             `)
-            .eq("employee_id", employeeId)
+            .eq("user_id", currentUser.id)
             .order("created_at", { ascending: false });
 
-        if (error) {
-            throw error;
-        }
+        if (error) throw error;
 
         if (!data || data.length === 0) {
-            const row = document.createElement("tr");
-            const cell = makeCell("No incident reports found for this Employee ID.");
-            cell.colSpan = 5;
-            cell.style.textAlign = "center";
-            row.appendChild(cell);
-            historyTableBody.appendChild(row);
+            addHistoryMessageRow("No incident reports found for your account.");
             return;
         }
+
+        historyTableBody.replaceChildren();
 
         data.forEach((report) => {
             const row = document.createElement("tr");
 
-            row.appendChild(makeCell(report.report_date || "—"));
-            row.appendChild(makeCell(report.incident_date || "—"));
-            row.appendChild(makeCell(report.incident_location || "—"));
+            row.appendChild(makeCell(report.report_date));
+            row.appendChild(makeCell(report.incident_date));
+            row.appendChild(makeCell(report.incident_location));
             row.appendChild(makeCell(getStatusLabel(report.manager_status)));
             row.appendChild(makeCell(getStatusLabel(report.hr_status)));
 
@@ -813,22 +849,18 @@ loadHistoryButton.addEventListener("click", async () => {
         );
     } catch (error) {
         console.error("Incident history error:", error);
-
+        addHistoryMessageRow("Unable to load your incident reports.");
         showHistoryMessage(
             "Unable to load report history. " +
             (error.message || "Please try again."),
             "error"
         );
-    } finally {
-        loadHistoryButton.disabled = false;
-        loadHistoryButton.textContent = "View My Reports";
     }
-});
-
-function showHistoryMessage(text, type) {
-    historyMessage.textContent = text;
-    historyMessage.className = "message " + type;
 }
+
+// Automatically load history when the page opens.
+loadIncidentHistory();
+
 
 </script>
 
