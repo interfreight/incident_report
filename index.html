@@ -515,18 +515,20 @@ button:disabled {
 
     <div style="overflow-x:auto; margin-top:20px;">
         <table style="width:100%; border-collapse:collapse; font-size:13px;">
-            <thead>
-                <tr style="background:#eef3f9; text-align:left;">
-                    <th style="padding:12px;">Report Date</th>
-                    <th style="padding:12px;">Incident Date</th>
-                    <th style="padding:12px;">Location</th>
-                    <th style="padding:12px;">Manager Status</th>
-                    <th style="padding:12px;">HR Status</th>
-                </tr>
-            </thead>
+          <thead>
+    <tr style="background:#eef3f9; text-align:left;">
+        <th style="padding:12px;">Report Date</th>
+        <th style="padding:12px;">Incident Date</th>
+        <th style="padding:12px;">Location</th>
+        <th style="padding:12px;">Manager Status</th>
+        <th style="padding:12px;">Manager Remarks</th>
+        <th style="padding:12px;">HR Status</th>
+        <th style="padding:12px;">HR/Admin Remarks</th>
+    </tr>
+</thead>
             <tbody id="historyTableBody">
                 <tr>
-                    <td colspan="5" style="padding:15px; text-align:center;">
+                    <td colspan="7" style="padding:15px; text-align:center;">
                         Enter your Employee ID to view your reports.
                     </td>
                 </tr>
@@ -783,7 +785,33 @@ function getStatusLabel(status) {
 
     return value || "Not yet reviewed";
 }
+function getManagerRemarks(report) {
+    const managerStatus = String(report.manager_status || "").toLowerCase();
+    const approvalRole = String(report.approval_role || "").toLowerCase();
 
+    return (
+        report.manager_comments ||
+        (approvalRole.includes("manager") ? report.approval_remarks : "") ||
+        (managerStatus === "rejected" ? report.rejection_comment : "") ||
+        "No remarks provided."
+    );
+}
+
+function getHRRemarks(report) {
+    const hrStatus = String(report.hr_status || "").toLowerCase();
+    const approvalRole = String(report.approval_role || "").toLowerCase();
+
+    return (
+        report.admin_hr_comments ||
+        (
+            approvalRole.includes("hr") || approvalRole.includes("admin")
+                ? report.approval_remarks
+                : ""
+        ) ||
+        (hrStatus === "rejected" ? report.rejection_comment : "") ||
+        "No remarks provided."
+    );
+}
 function addHistoryMessageRow(text) {
     historyTableBody.replaceChildren();
 
@@ -819,18 +847,23 @@ async function loadIncidentHistory() {
     addHistoryMessageRow("Loading your incident reports...");
 
     try {
-        const { data, error } = await supabaseClient
-            .from("incident_reports")
-            .select(`
-                report_date,
-                incident_date,
-                incident_location,
-                manager_status,
-                hr_status,
-                created_at
-            `)
-            .eq("user_id", currentUser.id)
-            .order("created_at", { ascending: false });
+      const { data, error } = await supabaseClient
+    .from("incident_reports")
+    .select(`
+        report_date,
+        incident_date,
+        incident_location,
+        manager_status,
+        hr_status,
+        manager_comments,
+        admin_hr_comments,
+        rejection_comment,
+        approval_remarks,
+        approval_role,
+        created_at
+    `)
+    .eq("user_id", currentUser.id)
+    .order("created_at", { ascending: false });
 
         if (error) throw error;
 
@@ -840,18 +873,19 @@ async function loadIncidentHistory() {
         }
 
         historyTableBody.replaceChildren();
+data.forEach((report) => {
+    const row = document.createElement("tr");
 
-        data.forEach((report) => {
-            const row = document.createElement("tr");
+    row.appendChild(makeCell(report.report_date));
+    row.appendChild(makeCell(report.incident_date));
+    row.appendChild(makeCell(report.incident_location));
+    row.appendChild(makeCell(getStatusLabel(report.manager_status)));
+    row.appendChild(makeCell(getManagerRemarks(report)));
+    row.appendChild(makeCell(getStatusLabel(report.hr_status)));
+    row.appendChild(makeCell(getHRRemarks(report)));
 
-            row.appendChild(makeCell(report.report_date));
-            row.appendChild(makeCell(report.incident_date));
-            row.appendChild(makeCell(report.incident_location));
-            row.appendChild(makeCell(getStatusLabel(report.manager_status)));
-            row.appendChild(makeCell(getStatusLabel(report.hr_status)));
-
-            historyTableBody.appendChild(row);
-        });
+    historyTableBody.appendChild(row);
+});
 
         showHistoryMessage(
             "Found " + data.length + " incident report(s).",
